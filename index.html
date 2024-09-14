@@ -1,0 +1,245 @@
+<html lang="en">
+<head><script src="/gdpr/gdprscript.js?buildTime=1725474968"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MP3 Spectrum Visualizer</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            margin: 0;
+            background-image: url('https://github.com/ruicirilo4/banner/blob/main/radio%20cascais.png?raw=true');
+            background-size: cover;
+            background-repeat: no-repeat;
+        }
+
+        h1 {
+            color: #ffcc00;
+            margin-bottom: 20px;
+        }
+
+        canvas {
+            border: 1px solid #fff;
+            width: 100%;
+            max-width: 1024px;
+            height: 300px;
+            background-color: rgba(34, 34, 34, 0.8);
+        }
+
+        input[type="file"] {
+            margin: 20px 0;
+            color: #fff;
+            background-color: #333;
+            border: 1px solid #fff;
+            padding: 10px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        #info {
+            margin: 10px 0;
+            color: #ad3636;
+        }
+
+        #trackName {
+            font-size: 16px;
+            margin-bottom: 10px;
+            display: block;
+        }
+
+        #currentTime,
+        #totalTime {
+            font-size: 14px;
+        }
+
+        .controls {
+            margin-top: 20px;
+        }
+
+        .controls button {
+            background-color: #ff0000;
+            color: #fff;
+            font-size: 16px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 0 5px;
+        }
+
+        .controls button:hover {
+            background-color: #cc0000;
+        }
+    </style>
+</head>
+<body>
+    <h1>MP3 Spectrum Visualizer</h1>
+    <input type="file" id="audioFile" accept="audio/mp3" multiple>
+    <canvas id="canvas"></canvas>
+    <div id="info">
+        <span id="trackName"></span>
+        <br>
+        <span id="currentTime"></span> / <span id="totalTime"></span>
+    </div>
+    <div class="controls">
+        <button id="playPauseButton">Play</button>
+    </div>
+
+    <script>
+        let audioContext;
+        let source;
+        let analyser;
+        let buffer;
+        let filesQueue = [];
+        let isPlaying = false;
+
+        document.getElementById('audioFile').addEventListener('change', function(event) {
+            const files = event.target.files;
+            for (let i = 0; i < files.length; i++) {
+                if (files[i].type === "audio/mpeg") {
+                    filesQueue.push(files[i]);
+                } else {
+                    alert("Please select a valid MP3 file.");
+                }
+            }
+            if (!isPlaying) {
+                playNext();
+            }
+        });
+
+        function playNext() {
+            if (filesQueue.length === 0) {
+                return;
+            }
+
+            const file = filesQueue.shift();
+            document.getElementById('trackName').textContent = file.name;
+
+            if (audioContext) {
+                audioContext.close();
+            }
+
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const fileReader = new FileReader();
+
+            fileReader.onload = function(e) {
+                audioContext.decodeAudioData(e.target.result, function(decodedBuffer) {
+                    buffer = decodedBuffer;
+                    setupAudio();
+                });
+            };
+
+            fileReader.readAsArrayBuffer(file);
+        }
+
+        function setupAudio() {
+            if (source) {
+                source.disconnect();
+            }
+            source = audioContext.createBufferSource();
+            source.buffer = buffer;
+
+            analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+
+            source.connect(analyser);
+            analyser.connect(audioContext.destination);
+
+            source.onended = () => {
+                isPlaying = false;
+                document.getElementById('playPauseButton').textContent = 'Play';
+                playNext();
+            };
+
+            source.start(0);
+            isPlaying = true;
+            document.getElementById('playPauseButton').textContent = 'Pause';
+
+            visualize(analyser);
+            updateProgress();
+        }
+
+        function visualize(analyser) {
+            const canvas = document.getElementById('canvas');
+            const canvasCtx = canvas.getContext('2d');
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            function draw() {
+                requestAnimationFrame(draw);
+
+                analyser.getByteFrequencyData(dataArray);
+
+                canvasCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+                canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+
+                const barWidth = (canvas.width / bufferLength) * 2.5;
+                let barHeight;
+                let x = 0;
+
+                for (let i = 0; i < bufferLength; i++) {
+                    barHeight = dataArray[i];
+
+                    const red = (barHeight + 100) % 256;
+                    const green = (barHeight * 2) % 256;
+                    const blue = (barHeight * 3) % 256;
+
+                    canvasCtx.fillStyle = `rgb(${red},${green},${blue})`;
+                    canvasCtx.shadowBlur = 20;
+                    canvasCtx.shadowColor = "white";
+                    canvasCtx.fillRect(x, canvas.height - barHeight / 2, barWidth, barHeight / 2);
+
+                    x += barWidth + 1;
+                }
+            }
+
+            draw();
+        }
+
+        function updateProgress() {
+            const currentTimeElem = document.getElementById('currentTime');
+            const totalTimeElem = document.getElementById('totalTime');
+
+            function update() {
+                if (isPlaying) {
+                    const currentTime = audioContext.currentTime;
+                    const totalTime = buffer.duration;
+
+                    currentTimeElem.textContent = formatTime(currentTime);
+                    totalTimeElem.textContent = formatTime(totalTime);
+
+                    requestAnimationFrame(update);
+                }
+            }
+
+            update();
+        }
+
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
+        }
+
+        document.getElementById('playPauseButton').addEventListener('click', function() {
+            if (isPlaying) {
+                audioContext.suspend().then(() => {
+                    isPlaying = false;
+                    document.getElementById('playPauseButton').textContent = 'Play';
+                });
+            } else {
+                audioContext.resume().then(() => {
+                    isPlaying = true;
+                    document.getElementById('playPauseButton').textContent = 'Pause';
+                });
+            }
+        });
+    </script>
+</body>
+</html>
